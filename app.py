@@ -127,6 +127,16 @@ def jitter_overlaps(df: pd.DataFrame, deg_radius: float = 0.25) -> pd.DataFrame:
 df_raw = load_csv("data/remedies.csv")
 df = coerce_and_validate(df_raw)
 
+# NEW: ensure exact-match filters won’t fail due to stray spaces/zero-width chars
+for col in ["ailment", "region", "country"]:
+    df[col] = (
+        df[col]
+        .astype(str)
+        .str.replace("\u00a0", " ", regex=False)  # NBSP
+        .str.replace("\u200b", "", regex=False)   # zero-width space
+        .str.strip()
+    )
+
 if df.empty:
     st.info("Your dataset is empty. Add rows to **data/remedies.csv** and refresh.")
     st.stop()
@@ -153,7 +163,8 @@ with st.sidebar:
 mask = pd.Series(True, index=df.index)
 
 if ailment != ALL_SYMPTOMS:
-    mask &= df["ailment"].str.contains(ailment, case=False, na=False)
+    # EXACT match: dropdown and filter use identical strings
+    mask &= df["ailment"].eq(ailment)
 
 if region != ALL_REGIONS:
     mask &= df["region"].eq(region)
