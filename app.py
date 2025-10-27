@@ -16,6 +16,51 @@ st.caption(
     "Always consult a qualified healthcare professional."
 )
 
+# ---------- About / Intro ----------
+with st.container():
+    st.subheader("What is this?")
+    st.markdown(
+        """
+**RemedyAtlas** collects and visualizes **folk and traditional home remedies** from around the world —
+filterable by **symptom/ailment**, **region**, **evidence level**, and **country**. Explore entries on a
+world map and browse them as cards or a table. Sources include public agencies (e.g., WHO/EMA/NCCIH)
+and reputable reviews. This is **purely informational** and **not medical advice**.
+        """
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(
+            """
+**How to use**
+- Use the sidebar to pick **Symptom/Ailment**
+- Optional filters: **Region**, **Evidence**, **Country contains**
+- Click pins on the map for details
+- Switch between **Card view / Table view** below
+            """
+        )
+    with c2:
+        st.markdown(
+            """
+**Evidence legend**
+- 🟢 **some/clinical** – some clinical evidence
+- 🟡 **mixed** – mixed/uncertain evidence
+- 🟠 **limited/low** – limited data only
+- ⚪ **folk/tradition** – traditional use
+- ⚫ **n/a** – not applicable
+            """
+        )
+    with c3:
+        st.markdown(
+            """
+**Safety**
+- Herbs can have **interactions** & **contraindications**
+- Extra caution for **pregnancy**, **children**, **heart/liver**, **anticoagulants**
+- For serious concerns, **seek medical care**
+            """
+        )
+    st.divider()
+
 # ---------------- Constants ----------------
 REQUIRED = [
     "ailment","plant_common","plant_scientific","preparation",
