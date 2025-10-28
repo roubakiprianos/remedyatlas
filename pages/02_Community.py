@@ -90,17 +90,36 @@ with st.sidebar:
 
     if _is_logged_in():
         st.success("You are logged in.")
+
         if st.button("Log out"):
+            # End Supabase session for THIS client and nuke local session state.
             try:
                 sb.auth.sign_out()
-            finally:
-                st.rerun()
+            except Exception:
+                pass
+            for k in ("user", "sb_token", "sb_refresh"):
+                st.session_state.pop(k, None)
+
+            # (Optional) also clear caches to avoid any stale user-bound data
+            try:
+                st.cache_data.clear()
+                st.cache_resource.clear()
+            except Exception:
+                pass
+
+            st.rerun()
 
         uid = _user_id()
         prof = _load_profile(uid)
         st.markdown("**Your profile**")
-        new_username = st.text_input("Username", value=prof.get("username") or _safe_username(_email_local_part()))
-        new_country  = st.text_input("Country (optional)", value=prof.get("country") or "")
+        new_username = st.text_input(
+            "Username",
+            value=prof.get("username") or _safe_username(_email_local_part()),
+        )
+        new_country = st.text_input(
+            "Country (optional)",
+            value=prof.get("country") or "",
+        )
         if st.button("Save profile"):
             try:
                 _upsert_profile(uid, new_username, new_country)
@@ -117,7 +136,11 @@ with st.sidebar:
             password = st.text_input("Password", type="password", key="login_pw")
             if st.button("Log in"):
                 try:
-                    sb.auth.sign_in_with_password({"email": email.strip(), "password": password})
+                    sb.auth.sign_in_with_password(
+                        {"email": email.strip(), "password": password}
+                    )
+                    # Optionally store a lightweight flag for this session
+                    st.session_state["user"] = "ok"
                     st.success("Logged in.")
                     st.rerun()
                 except Exception as e:
@@ -128,6 +151,7 @@ with st.sidebar:
             pw2 = st.text_input("Password (sign up)", type="password", key="signup_pw")
             if st.button("Create account"):
                 try:
+                    # Email confirmation is controlled in Supabase Auth settings.
                     sb.auth.sign_up({"email": email2.strip(), "password": pw2})
                     st.success("Account created.")
                     st.rerun()
