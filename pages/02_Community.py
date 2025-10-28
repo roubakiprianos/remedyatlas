@@ -72,9 +72,8 @@ else:
             plant_common = st.text_input("Plant (common name) (optional)")
             preparation = st.text_input("Preparation (e.g., Tea with honey)")
         with cols[1]:
-            latitude = st.text_input("Latitude (optional)")
-            longitude = st.text_input("Longitude (optional)")
             source_url = st.text_input("Source URL (optional)")
+
         remedy_text = st.text_area("Describe the remedy and cultural context", height=120)
 
         submitted = st.form_submit_button("Publish")
@@ -83,11 +82,6 @@ else:
                 st.error("Country, Ailment and Remedy description are required.")
             else:
                 try:
-                    def to_float(x):
-                        try:
-                            return float(x)
-                        except:
-                            return None
                     sb.table("posts").insert({
                         "user_id": _user_id(),
                         "country": country.strip(),
@@ -96,8 +90,6 @@ else:
                         "remedy_text": remedy_text.strip(),
                         "plant_common": (plant_common.strip() or None),
                         "preparation": (preparation.strip() or None),
-                        "latitude": to_float(latitude),
-                        "longitude": to_float(longitude),
                         "source_url": (source_url.strip() or None),
                         "status": "published",
                     }).execute()
