@@ -4,6 +4,9 @@ import html
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
+from lib.supabase_client import get_client
+sb = get_client()
+
 import streamlit as st
 from supabase import create_client, Client
 
