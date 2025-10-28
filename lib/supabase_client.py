@@ -1,15 +1,14 @@
 # lib/supabase_client.py
-from supabase import create_client, Client
 import streamlit as st
+from supabase import create_client, Client
 
-@st.cache_resource
 def get_client() -> Client:
-    try:
-        url = st.secrets["SUPABASE_URL"].strip()
-        key = st.secrets["SUPABASE_ANON_KEY"].strip()
-    except KeyError as e:
-        raise RuntimeError(
-            f"Missing Streamlit secret: {e}. "
-            "Add SUPABASE_URL and SUPABASE_ANON_KEY in Streamlit Cloud → App → Settings → Secrets."
-        )
-    return create_client(url, key)
+    """
+    Return a Supabase client that is unique to the user's Streamlit session.
+    This prevents auth from leaking across users.
+    """
+    if "sb_client" not in st.session_state:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_ANON_KEY"]
+        st.session_state["sb_client"] = create_client(url, key)
+    return st.session_state["sb_client"]
