@@ -6,6 +6,14 @@ from lib.supabase_client import get_client
 st.set_page_config(page_title="Community — RemedyAtlas", page_icon="🫶", layout="wide")
 sb = get_client()
 
+# After: sb = get_client()
+if "sb_tokens" in st.session_state:
+    tokens = st.session_state["sb_tokens"]
+    try:
+        sb.auth.set_session(tokens["access"], tokens["refresh"])
+    except Exception:
+        pass
+
 st.title("🫶 Community")
 st.caption("Share folk remedies from your culture and browse others. Please be respectful. Not medical advice.")
 
@@ -30,28 +38,45 @@ with st.sidebar:
         st.success("You are logged in.")
         if st.button("Log out"):
             sb.auth.sign_out()
+            st.session_state.pop("sb_tokens", None)   # <-- clear saved tokens
             st.rerun()
     else:
         tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
 
+        # ---------- LOG IN ----------
         with tab_login:
             email = st.text_input("Email", key="login_email")
             password = st.text_input("Password", type="password", key="login_pw")
             if st.button("Log in"):
                 try:
-                    sb.auth.sign_in_with_password({"email": email.strip(), "password": password})
+                    res = sb.auth.sign_in_with_password({"email": email.strip(), "password": password})
+                    sess = getattr(res, "session", None)
+                    if sess:
+                        st.session_state["sb_tokens"] = {
+                            "access": sess.access_token,
+                            "refresh": sess.refresh_token,
+                        }
                     st.success("Logged in.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {e}")
 
+        # ---------- SIGN UP (no email confirmation) ----------
         with tab_signup:
             email2 = st.text_input("Email (sign up)", key="signup_email")
             pw2 = st.text_input("Password (sign up)", type="password", key="signup_pw")
             if st.button("Create account"):
                 try:
                     sb.auth.sign_up({"email": email2.strip(), "password": pw2})
-                    st.success("Account created. If email confirmation is required, check your inbox.")
+                    res = sb.auth.sign_in_with_password({"email": email2.strip(), "password": pw2})
+                    sess = getattr(res, "session", None)
+                    if sess:
+                        st.session_state["sb_tokens"] = {
+                            "access": sess.access_token,
+                            "refresh": sess.refresh_token,
+                        }
+                    st.success("Account created and you’re logged in.")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Sign-up failed: {e}")
 
