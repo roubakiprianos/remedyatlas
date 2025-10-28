@@ -1,8 +1,8 @@
 # pages/02_Community.py
-from __future__ import annotations
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
 import re
+import html
+from datetime import datetime, timezone
+from typing import Dict, Any, List, Optional
 
 import streamlit as st
 from supabase import create_client, Client
@@ -12,12 +12,12 @@ st.caption("Share folk practices from your culture. Be kind. Not medical advice.
 
 # ================= Supabase client =================
 @st.cache_resource
-def _sb() -> Client:
+def get_sb() -> Client:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_ANON_KEY"]
     return create_client(url, key)
 
-sb = _sb()
+sb = get_sb()
 
 # ================= Auth helpers =================
 def _get_user():
@@ -41,9 +41,9 @@ def _email_local_part() -> str:
     return u.email.split("@", 1)[0]
 
 def _safe_username(seed: str) -> str:
-    s = seed.strip()
-    s = re.sub(r"\s+", "_", s)          # spaces → underscores
-    s = re.sub(r"[^a-zA-Z0-9_.-]", "", s)  # remove funky chars
+    s = (seed or "").strip()
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"[^a-zA-Z0-9_.-]", "", s)
     return s[:32] or "anon"
 
 # ================= Profile helpers =================
@@ -52,10 +52,12 @@ def _load_profile(uid: str) -> Dict[str, Any]:
         res = sb.table("profiles").select("*").eq("id", uid).limit(1).execute()
         if res.data:
             return res.data[0]
-        # create a minimal profile if missing
+        # create minimal profile if missing
         default_username = _safe_username(_email_local_part())
         ins = sb.table("profiles").insert({"id": uid, "username": default_username}).execute()
-        return ins.data[0] if ins.data else {"id": uid, "username": default_username}
+        if ins.data:
+            return ins.data[0]
+        return {"id": uid, "username": default_username}
     except Exception:
         return {"id": uid, "username": "anon"}
 
@@ -64,8 +66,7 @@ def _upsert_profile(uid: str, username: Optional[str], country: Optional[str]):
     if username is not None:
         payload["username"] = _safe_username(username)
     if country is not None:
-        payload["country"] = country.strip() or None
-    # upsert on PK id
+        payload["country"] = (country or "").strip() or None
     sb.table("profiles").upsert(payload, on_conflict="id").execute()
 
 def _profiles_map(user_ids: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -89,11 +90,9 @@ with st.sidebar:
         if st.button("Log out"):
             try:
                 sb.auth.sign_out()
-            except Exception as e:
-                st.error(f"Logout failed: {e}")
-            st.rerun()
+            finally:
+                st.rerun()
 
-        # ---- Profile editor ----
         uid = _user_id()
         prof = _load_profile(uid)
         st.markdown("**Your profile**")
@@ -162,7 +161,7 @@ else:
             if not ailment.strip() or not country.strip() or not remedy_text.strip():
                 st.error("Please fill at least Ailment, Country, and Remedy description.")
             else:
-                data = {
+                payload = {
                     "user_id": _user_id(),
                     "ailment": ailment.strip(),
                     "country": country.strip(),
@@ -171,10 +170,9 @@ else:
                     "preparation": preparation.strip() or None,
                     "source_url": source_url.strip() or None,
                     "remedy_text": remedy_text.strip(),
-                    # status defaults to 'published' in DB
                 }
                 try:
-                    res = sb.table("posts").insert(data).execute()
+                    res = sb.table("posts").insert(payload).execute()
                     if getattr(res, "data", None):
                         st.success("Thanks! Your remedy is live.")
                         st.rerun()
@@ -197,18 +195,18 @@ with c3:
 
 # ================= Data access =================
 def fetch_posts() -> List[Dict[str, Any]]:
-    query = sb.table("posts").select("*")
-    # If 'status' exists, filter it (if schema not yet updated, skip quietly)
+    q = sb.table("posts").select("*")
+    # If 'status' column exists, filter to published; ignore if not present
     try:
-        query = query.eq("status", "published")
+        q = q.eq("status", "published")
     except Exception:
         pass
     if q_country.strip():
-        query = query.ilike("country", f"%{q_country.strip()}%")
+        q = q.ilike("country", f"%{q_country.strip()}%")
     if q_ailment.strip():
-        query = query.ilike("ailment", f"%{q_ailment.strip()}%")
-    query = query.order("created_at", desc=newest_first)
-    res = query.execute()
+        q = q.ilike("ailment", f"%{q_ailment.strip()}%")
+    q = q.order("created_at", desc=newest_first)
+    res = q.execute()
     return res.data or []
 
 def vote_count(post_id: str) -> int:
@@ -222,7 +220,12 @@ def user_has_voted(post_id: str, user_id: str) -> bool:
     if not user_id:
         return False
     try:
-        res = sb.table("votes").select("post_id,user_id").eq("post_id", post_id).eq("user_id", user_id).limit(1).execute()
+        res = (sb.table("votes")
+               .select("post_id,user_id")
+               .eq("post_id", post_id)
+               .eq("user_id", user_id)
+               .limit(1)
+               .execute())
         return bool(res.data)
     except Exception:
         return False
@@ -255,13 +258,16 @@ def add_comment(post_id: str, body: str):
 def _fmt_date_ddmmyyyy(iso_string: str) -> str:
     try:
         dt = datetime.fromisoformat(iso_string.replace("Z", "+00:00")).astimezone(timezone.utc)
-        return dt.strftime("%d/%m/%Y")  # DD/MM/YYYY
+        return dt.strftime("%d/%m/%Y")
     except Exception:
         return iso_string
 
+def _chip(text: str) -> str:
+    return f"<span class='chip'>{html.escape(text)}</span>"
+
 # ================= Feed render =================
-posts = []
-err = None
+posts: List[Dict[str, Any]] = []
+err: Optional[str] = None
 try:
     posts = fetch_posts()
 except Exception as e:
@@ -272,11 +278,7 @@ if err:
 elif not posts:
     st.info("No posts yet. Be the first to share!")
 else:
-    # build a user_id → profile map for usernames
-    uids = sorted({p["user_id"] for p in posts if p.get("user_id")})
-    prof_map = _profiles_map(uids)
-
-    # styles
+    # Minimal CSS
     st.markdown(
         """
         <style>
@@ -284,79 +286,81 @@ else:
           .post-top{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}
           .chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#1f2a36;color:#b7c5d3;border:1px solid #263445}
           .post-body{color:#d8e2ee;margin:6px 0}
-          .muted{color:#9fb0c2;font-size:12px}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    uid = _user_id() or ""
+    # author usernames
+    uid_list = sorted({p["user_id"] for p in posts if p.get("user_id")})
+    prof_map = _profiles_map(uid_list)
+    current_uid = _user_id() or ""
+
     for p in posts:
         pid = p["id"]
-        author = prof_map.get(str(p.get("user_id")), {})
-        username = author.get("username") or "anon"
+        prof = prof_map.get(str(p.get("user_id")), {})
+        username = prof.get("username") or "anon"
         when = _fmt_date_ddmmyyyy(p.get("created_at", ""))
 
-        # chips
-        top_bits = []
-        if p.get("country"): top_bits.append(p["country"])
-        if p.get("region"):  top_bits.append(p["region"])
-        top_txt = " • ".join(top_bits)
+        top_html_parts = [
+            _chip("👤 " + username),
+            _chip(when),
+            _chip("🩺 " + (p.get("ailment") or "—")),
+        ]
+        country = p.get("country")
+        region = p.get("region")
+        if country:
+            top_html_parts.append(_chip(country))
+        if region:
+            top_html_parts.append(_chip(region))
+        if p.get("plant_common"):
+            top_html_parts.append(_chip("🌿 " + p["plant_common"]))
+
+        top_html = "".join(top_html_parts)
 
         vc = vote_count(pid)
-        already = user_has_voted(pid, uid)
+        already = user_has_voted(pid, current_uid)
 
-        with st.container():
-            st.markdown("<div class='post-card'>", unsafe_allow_html=True)
-            colA, colB = st.columns([0.7, 0.3], vertical_alignment="center")
-            with colA:
-                st.markdown(
-                    f"<div class='post-top'>"
-                    f"<span class='chip'>👤 {username}</span>"
-                    f"<span class='chip'>{when}</span>"
-                    f"<span class='chip'>🩺 {p.get('ailment','—')}</span>"
-                    f"{f'<span class=\"chip\">{top_txt}</span>' if top_txt else ''}"
-                    f"{f'<span class=\"chip\">🌿 {p.get(\"plant_common\")}</span>' if p.get('plant_common') else ''}"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-            with colB:
-                if st.button(("💚 Empathy" if not already else "💔 Remove vote") + f" · {vc}", key=f"vote-{pid}"):
-                    if not _is_logged_in():
-                        st.warning("Log in to vote.")
-                    else:
-                        toggle_vote(pid, uid)
-                        st.rerun()
+        st.markdown("<div class='post-card'>", unsafe_allow_html=True)
+        st.markdown(f"<div class='post-top'>{top_html}</div>", unsafe_allow_html=True)
 
-            st.markdown(f"<div class='post-body'>{p.get('remedy_text','')}</div>", unsafe_allow_html=True)
+        st.markdown("<div class='post-body'>" + html.escape(p.get("remedy_text", "")) + "</div>", unsafe_allow_html=True)
 
-            extras = []
-            if p.get("preparation"): extras.append(f"Prep: {p['preparation']}")
-            if p.get("source_url"):  extras.append(f"[Source]({p['source_url']})")
-            if extras:
-                st.markdown(" • ".join(extras))
+        extras = []
+        if p.get("preparation"):
+            extras.append("Prep: " + html.escape(p["preparation"]))
+        if p.get("source_url"):
+            extras.append(f"[Source]({p['source_url']})")
+        if extras:
+            st.markdown(" • ".join(extras))
 
-            # Comments (optional username on each)
-            with st.expander("💬 Comments"):
-                cs = fetch_comments(pid)
-                if not cs:
-                    st.write("_No comments yet._")
+        btn_label = ("💚 Empathy" if not already else "💔 Remove vote") + f" · {vc}"
+        if st.button(btn_label, key=f"vote-{pid}"):
+            if not _is_logged_in():
+                st.warning("Log in to vote.")
+            else:
+                toggle_vote(pid, current_uid)
+                st.rerun()
+
+        with st.expander("💬 Comments"):
+            cs = fetch_comments(pid)
+            if not cs:
+                st.write("_No comments yet._")
+            else:
+                cm_uids = sorted({c["user_id"] for c in cs if c.get("user_id")})
+                cm_map = _profiles_map(cm_uids)
+                for c in cs:
+                    cu = cm_map.get(str(c.get("user_id")), {})
+                    cu_name = cu.get("username") or "anon"
+                    when_c = _fmt_date_ddmmyyyy(c.get("created_at", ""))
+                    st.markdown(f"- **{html.escape(cu_name)}** — {when_c}: {html.escape(c.get('body',''))}")
+
+            new_c = st.text_input("Add a comment", key=f"c-{pid}")
+            if st.button("Post comment", key=f"cbtn-{pid}"):
+                if not new_c.strip():
+                    st.warning("Write something first.")
                 else:
-                    # fetch commenters' profiles once
-                    cm_uids = sorted({c["user_id"] for c in cs if c.get("user_id")})
-                    cm_map = _profiles_map(cm_uids)
-                    for c in cs:
-                        cu = cm_map.get(str(c.get("user_id")), {})
-                        cu_name = cu.get("username") or "anon"
-                        when_c = _fmt_date_ddmmyyyy(c.get("created_at", ""))
-                        st.markdown(f"- **{cu_name}** — {when_c}: {c.get('body','')}")
+                    add_comment(pid, new_c)
+                    st.rerun()
 
-                new_c = st.text_input("Add a comment", key=f"c-{pid}")
-                if st.button("Post comment", key=f"cbtn-{pid}"):
-                    if not new_c.strip():
-                        st.warning("Write something first.")
-                    else:
-                        add_comment(pid, new_c)
-                        st.rerun()
-
-            st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
