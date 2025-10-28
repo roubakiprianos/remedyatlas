@@ -3,3 +3,4 @@ pandas>=2.2
 numpy>=1.26
 altair>=5.2
 pydeck>=0.9
+supabase>=2.4.0
